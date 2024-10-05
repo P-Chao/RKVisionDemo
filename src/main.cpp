@@ -7,14 +7,27 @@
 #include <iostream>
 #include <string>
 #include "JPEGSource.h"
+#include <mutex>
 
 #include <opencv2/opencv.hpp>
 
+#define LOGV(x) std::cout << "V [" << __FILE__ << "+L" << __LINE__ << "] " << x << std::endl
 #define LOGI(x) std::cout << "I [" << __FILE__ << "+L" << __LINE__ << "] " << x << std::endl
 #define LOGE(x) std::cout << "E*[" << __FILE__ << "+L" << __LINE__ << "] " << x << std::endl
 #define LOGD(x) ;
 
-void SendFrameThread(xop::RtspServer* rtsp_server, xop::MediaSessionId session_id, int& clients);
+typedef struct {
+    // algo<->rtsp
+    std::mutex mtx;
+    bool update;
+    int width;
+    int height;
+    cv::Mat frame;
+} ShareObject;
+
+void SendFrameThread(ShareObject *p_share, xop::RtspServer* rtsp_server, xop::MediaSessionId session_id, int& clients);
+
+void ProcFrameThread(ShareObject *p_share);
 
 int main(int argc, char **argv)
 {    
@@ -49,9 +62,17 @@ int main(int argc, char **argv)
         
     xop::MediaSessionId session_id = server->AddSession(session); 
     //server->removeMeidaSession(session_id); /* 取消会话, 接口线程安全 */
-         
-    std::thread thread(SendFrameThread, server.get(), session_id, std::ref(clients));
-    thread.detach();
+    
+    ShareObject share_obj;
+    share_obj.height = 1080;
+    share_obj.width = 1920;
+    share_obj.update = false;
+
+    std::thread thread_send(SendFrameThread, &share_obj, server.get(), session_id, std::ref(clients));
+    thread_send.detach();
+
+    std::thread thread_proc(ProcFrameThread, &share_obj);
+    thread_proc.detach();
 
     while(1) {
         xop::Timer::Sleep(100);
@@ -84,16 +105,16 @@ private:
     int  m_count = 0;
 };
 
-void SendFrameThread(xop::RtspServer* rtsp_server, xop::MediaSessionId session_id, int& clients)
+void SendFrameThread(ShareObject *p_share, xop::RtspServer* rtsp_server, xop::MediaSessionId session_id, int& clients)
 {
     int buf_size = 2000000;
     std::unique_ptr<uint8_t> frame_buf(new uint8_t[buf_size]);
 
-    int height = 1080;
-    int width = 1920;
+    int height = p_share->height;
+    int width = p_share->width;
 
     cv::Mat image = cv::Mat::zeros(height, width, CV_8UC3);
-    cv::putText(image, "test", cv::Point(800, 500), cv::FONT_HERSHEY_PLAIN, 2.0, CV_RGB(255, 0, 0));
+    cv::putText(image, "RK Vision Demo (RK3588) \n         ver.20241005", cv::Point(800, 500), cv::FONT_HERSHEY_PLAIN, 2.0, CV_RGB(255, 0, 0));
     
     JPEGFile JPEG_file;
     JPEG_file.Open(image);
@@ -103,6 +124,18 @@ void SendFrameThread(xop::RtspServer* rtsp_server, xop::MediaSessionId session_i
         if(clients >= 0) /* 会话有客户端在线, 发送音视频数据 */
         {
             {
+                if (p_share->mtx.try_lock()) {
+                    if(p_share->update == true && !p_share->frame.empty()) {
+                        p_share->update = false;
+                        image = p_share->frame;
+                        JPEG_file.Close();
+                        JPEG_file.Open(image);
+                        //image.release();
+                    }
+                    p_share->mtx.unlock();
+
+                }
+
                 bool end_of_frame = false;
                 int frame_size = JPEG_file.ReadFrame((char*)frame_buf.get(), buf_size, &end_of_frame);
                 if (frame_size > 0) {
@@ -280,3 +313,41 @@ int JPEGFile::ReadFrame(char* in_buf, int in_buf_size, bool* end)
     return size;
 #endif
 }
+
+void ProcFrameThread(ShareObject *p_share) {
+    int height_out = p_share->height;
+    int width_out = p_share->width;
+
+    cv::Mat frame_input;
+    cv::Mat frame_output;
+
+    //LOGV(cv::getBuildInformation());
+
+    cv::VideoCapture capture;
+    capture.open("v4l2src device=/dev/video11 ! video/x-raw,format=NV12,width=3840,height=2160,framerate=30/1 ! videoconvert ! appsink",cv::CAP_GSTREAMER);
+
+    if (!capture.isOpened()) {
+        std::cout << "camera open failed." << std::endl;
+        return;
+    }
+
+    while(true) {
+        capture.read(frame_input);
+
+        if (frame_input.empty()) {
+            break;
+        }
+
+        cv::resize(frame_input, frame_output, cv::Size(width_out, height_out));
+
+        if (p_share->mtx.try_lock()) {
+            p_share->update = true;
+            p_share->frame = frame_output;
+            p_share->mtx.unlock();
+        }
+
+        //
+    }
+    
+}
+

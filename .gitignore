@@ -1,1 +1,6 @@
 build/*
+.idea/*
+.vs/*
+.vscode/*
+.code/*
+*__pycache__/*
