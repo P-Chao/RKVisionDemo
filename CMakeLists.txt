@@ -23,11 +23,15 @@ include_directories(${RKNN_API_PATH}/include)
 # RTSP
 aux_source_directory(src/xop SOURCE1)
 aux_source_directory(src/net SOURCE2)
+aux_source_directory(src/algo SOURCE_ALGO)
+aux_source_directory(src/utils SOURCE_UTILS)
 
 include_directories(    
     src    
     src/xop
     src/net
+    src/algo
+    src/common
     3rdparty
     3rdparty/librknn_api/include
     )
@@ -36,6 +40,8 @@ add_executable(${PROJECT_NAME}
 src/main.cpp
 ${SOURCE1}
 ${SOURCE2}
+${SOURCE_ALGO}
+${SOURCE_UTILS}
 3rdparty/md5/md5.hpp
 )
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS} ${RKNN_RT_LIB} OpenSSL::SSL OpenSSL::Crypto pthread)

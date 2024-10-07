@@ -64,8 +64,8 @@ int main(int argc, char **argv)
     //server->removeMeidaSession(session_id); /* 取消会话, 接口线程安全 */
     
     ShareObject share_obj;
-    share_obj.height = 1080;
-    share_obj.width = 1920;
+    share_obj.height = 720;
+    share_obj.width = 1280;
     share_obj.update = false;
 
     std::thread thread_send(SendFrameThread, &share_obj, server.get(), session_id, std::ref(clients));
@@ -178,7 +178,7 @@ void SendFrameThread(ShareObject *p_share, xop::RtspServer* rtsp_server, xop::Me
             }        
         }
 
-        xop::Timer::Sleep(10); /* 实际使用需要根据帧率计算延时! */
+        xop::Timer::Sleep(20); /* 实际使用需要根据帧率计算延时! */
     }
 
     JPEG_file.Close();
